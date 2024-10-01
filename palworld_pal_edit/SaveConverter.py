@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 
-from palworld_save_tools.gvas import GvasFile
+from palworld_pal_edit.fix_save import ProgressGvasFile
 from palworld_save_tools.json_tools import CustomEncoder
 from palworld_save_tools.palsav import compress_gvas_to_sav, decompress_sav_to_gvas
 from palworld_save_tools.paltypes import PALWORLD_CUSTOM_PROPERTIES, PALWORLD_TYPE_HINTS
@@ -71,7 +71,7 @@ def convert_sav_to_obj(filename):
         data = f.read()
         raw_gvas, _ = decompress_sav_to_gvas(data)
     print(f"Loading GVAS file")
-    gvas_file = GvasFile.read(raw_gvas, PALWORLD_TYPE_HINTS, PALWORLD_CUSTOM_PROPERTIES)
+    gvas_file = ProgressGvasFile.read(raw_gvas, PALWORLD_TYPE_HINTS, PALWORLD_CUSTOM_PROPERTIES)
     return gvas_file.dump()
 
 
@@ -110,7 +110,7 @@ def convert_sav_to_json(filename, output_path, force=False, minify=False):
         data = f.read()
         raw_gvas, _ = decompress_sav_to_gvas(data)
     print(f"Loading GVAS file")
-    gvas_file = GvasFile.read(raw_gvas, PALWORLD_TYPE_HINTS, PALWORLD_CUSTOM_PROPERTIES)
+    gvas_file = ProgressGvasFile.read(raw_gvas, PALWORLD_TYPE_HINTS, PALWORLD_CUSTOM_PROPERTIES)
     print(f"Writing JSON to {output_path}")
     with open(output_path, "w", encoding="utf8") as f:
         indent = None if minify else "\t"

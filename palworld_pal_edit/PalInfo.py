@@ -9,6 +9,8 @@ import uuid
 import copy
 import math
 
+from cloudpickle import instance
+
 module_dir = os.path.dirname(os.path.realpath(__file__))
 if not os.path.exists("%s/resources/data/elements.json" % module_dir) and getattr(sys, 'frozen', False):
     # for some reason os.path when compiled with CxFreeze bugs out the program. Will look into it.
@@ -130,6 +132,20 @@ class PalGender(Enum):
     FEMALE = "#EC49A6"
     UNKNOWN = "darkgrey"
 
+# fix for the new save format of crafting speed
+def get_status_point(status_list, status_name):
+    for status_entry in status_list['value']['values']:
+        if status_entry['StatusName']['value'] == status_name:
+            return status_entry['StatusPoint']['value']
+    return 0  # Default value if not found
+
+def set_status_point(status_list, status_name, value):
+    for status_entry in status_list['value']['values']:
+        if status_entry['StatusName']['value'] == status_name:
+            status_entry['StatusPoint']['value'] = value
+            return
+    # If not found, you may need to add a new entry
+
 
 class PalObject:
     def __init__(self, name, code_name, primary, secondary="None", human=False, tower=False, scaling=None, suits={}):
@@ -221,16 +237,18 @@ class PalEntity:
         else:
             self._gender = "Unknown"
 
-        self._workspeed = self._obj['CraftSpeed']['value']
+        self._status_points = self._obj['GotStatusPointList']
+        self._workspeed = get_status_point(self._status_points, '作業速度')  # '作業速度' means 'Work Speed'
+
 
         if not "Talent_HP" in self._obj:
             self._obj['Talent_HP'] = copy.deepcopy(EmptyMeleeObject)
             self._talent_hp = 0  # we set 0, so if its not changed it should be removed by the game again.
         self._talent_hp = self._obj['Talent_HP']['value']
 
-        if not "Talent_Melee" in self._obj:
-            self._obj['Talent_Melee'] = copy.deepcopy(EmptyMeleeObject)
-        self._melee = self._obj['Talent_Melee']['value']
+        # attribute changes
+        self._melee = get_status_point(self._status_points, '攻撃力')  # '攻撃力' means 'Attack Power'
+
 
         if not "Talent_Shot" in self._obj:
             self._obj['Talent_Shot'] = copy.deepcopy(EmptyShotObject)
@@ -285,6 +303,9 @@ class PalEntity:
             self._obj["Hp"] = copy.deepcopy(EmptyHpObject)
         self.UpdateMaxHP()
 
+
+
+
     def IsHuman(self):
         return self._type._human
 
@@ -320,37 +341,51 @@ class PalEntity:
         return avail_skills
 
     def CleanseAttacks(self):
+        # Extract the integer level value
+        current_level = self.GetLevel()
+
+        # Initialize index for while loop
         i = 0
         while i < len(self._learntMoves):
             remove = False
-            if self._learntMoves[i] in ["None", "EPalWazaID::None"]:
+            skill = self._learntMoves[i]
+
+            # Remove 'None' skills
+            if skill in ["None", "EPalWazaID::None"]:
                 remove = True
             else:
-                # Check skill has Exclusivity
-                if not (SkillExclusivity[self._learntMoves[i]] is None):
-                    if not self._type.GetCodeName() in SkillExclusivity[self._learntMoves[i]]:
+                # Check skill exclusivity
+                exclusivity = SkillExclusivity.get(skill)
+                if exclusivity is not None and self._type.GetCodeName() not in exclusivity:
+                    remove = True
+
+                # Check if the skill is available at the Pal's current level
+                pal_learnset = PalLearnSet.get(self._type.GetCodeName(), {})
+                skill_required_level = pal_learnset.get(skill)
+                if skill_required_level is not None:
+                    if current_level < skill_required_level and skill not in self._equipMoves:
                         remove = True
-                # Check level are available for Skills
-                if self._learntMoves[i] in PalLearnSet[self._type.GetCodeName()]:
-                    if not self._level >= PalLearnSet[self._type.GetCodeName()][self._learntMoves[i]]:
-                        if not self._learntMoves[i] in self._equipMoves:
-                            remove = True
 
             if remove:
-                if self._learntMoves[i] in self._equipMoves:
-                    self._equipMoves.remove(self._learntMoves[i])
+                # Remove skill from equipped moves if necessary
+                if skill in self._equipMoves:
+                    self._equipMoves.remove(skill)
+                # Remove skill from learnt moves
                 self._learntMoves.pop(i)
             else:
                 i += 1
 
-        for skill_CodeName in PalLearnSet[self._type.GetCodeName()]:
-            if not skill_CodeName in self._learntMoves:
-                if PalLearnSet[self._type.GetCodeName()][skill_CodeName] <= self._level:
-                    self._learntMoves.append(skill_CodeName)
+        # Add new skills based on current level
+        pal_learnset = PalLearnSet.get(self._type.GetCodeName(), {})
+        for skill_CodeName, required_level in pal_learnset.items():
+            if skill_CodeName not in self._learntMoves and required_level <= current_level:
+                self._learntMoves.append(skill_CodeName)
 
-        for i in self._equipMoves:
-            if not i in self._learntMoves:
-                self._learntMoves.append(i)
+        # Ensure equipped moves are in learnt moves
+        for move in self._equipMoves:
+            if move not in self._learntMoves:
+                self._learntMoves.append(move)
+
 
     def GetType(self):
         return self._type
@@ -376,14 +411,22 @@ class PalEntity:
         return self._workspeed
 
     def SetWorkSpeed(self, value):
-        self._obj['CraftSpeed']['value'] = self._workspeed = value
+        set_status_point(self._status_points, '作業速度', value)
+        self._workspeed = value
+
+    def SetAttackMelee(self, value):
+        set_status_point(self._status_points, '攻撃力', value)
+        self._melee = value
+
 
     def SetAttack(self, mval, rval):
         self._obj['Talent_Melee']['value'] = self._melee = mval
         self._obj['Talent_Shot']['value'] = self._ranged = rval
 
     def GetTalentHP(self):
-        return self._talent_hp
+        if isinstance(self._talent_hp, int):
+            return self._talent_hp
+        return self._talent_hp['value']
 
     def SetTalentHP(self, value):
         self._obj['Talent_HP']['value'] = self._talent_hp = value
@@ -534,19 +577,23 @@ class PalEntity:
         print("%s MaxHP: %s -> %s" % (self.GetFullName(), old_hp, new_hp))
 
     def GetAttackMelee(self):
-        return self._melee
+        if isinstance(self._melee, int):
+            return self._melee
+        return self._melee['value']
 
-    def SetAttackMelee(self, value):
-        self._obj['Talent_Melee']['value'] = self._melee = value
 
     def GetAttackRanged(self):
-        return self._ranged
+        if isinstance(self._ranged, int):
+            return self._ranged
+        return self._ranged['value']
 
     def SetAttackRanged(self, value):
         self._obj['Talent_Shot']['value'] = self._ranged = value
 
     def GetDefence(self):
-        return self._defence
+        if isinstance(self._defence, int):
+            return self._defence
+        return self._defence['value']
 
     def SetDefence(self, value):
         self._obj['Talent_Defense']['value'] = self._defence = value
@@ -591,7 +638,9 @@ class PalEntity:
         return self.owner
 
     def GetLevel(self):
-        return self._level
+        if isinstance(self._level, int):
+            return self._level
+        return self._level['value']
 
     def SetLevel(self, value):
         # We need this check until we fix adding missing nodes
@@ -737,10 +786,13 @@ class PalGuid:
         self._GroupSaveDataMap = data['properties']['worldSaveData']['value']['GroupSaveDataMap']['value']
 
     def GetPlayerslist(self):
-        players = list(filter(lambda x: 'IsPlayer' in x['value'], [
-            {'uid': x['key']['PlayerUId'],
-             'value': x['value']['RawData']['value']['object']['SaveParameter']['value']
-             } for x in self._data['properties']['worldSaveData']['value']['CharacterSaveParameterMap']['value']]))
+        try:
+            players = list(filter(lambda x: 'IsPlayer' in x['value'], [
+                {'uid': x['key']['PlayerUId'],
+                 'value': x['value']['RawData']['value']['object']['SaveParameter']['value']
+                 } for x in self._data['properties']['worldSaveData']['value']['CharacterSaveParameterMap']['value']]))
+        except:
+            return {}
 
         out = {}
         for x in players:

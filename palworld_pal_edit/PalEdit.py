@@ -3,7 +3,8 @@ import os, webbrowser, json, time, uuid, math, zipfile
 import pyperclip
 
 import palworld_pal_edit.SaveConverter
-
+from internal_libs.palobject import SKP_PALWORLD_CUSTOM_PROPERTIES
+from palworld_pal_edit.fix_save import ProgressGvasFile
 
 from palworld_save_tools.gvas import GvasFile
 from palworld_save_tools.archive import FArchiveReader, FArchiveWriter, UUID
@@ -14,6 +15,7 @@ import tkinter as tk
 import copy
 
 import palworld_pal_edit.PalInfo as PalInfo
+from palworld_pal_edit import SaveConverter
 from palworld_pal_edit.PalEditLogger import *
 
 from tkinter import *
@@ -627,7 +629,10 @@ class PalEdit():
                 data = f.read()
                 raw_gvas, _ = decompress_sav_to_gvas(data)
             self.skilllabel.config(text=self.i18n['msg_loading'])
-            gvas_file = GvasFile.read(raw_gvas, PALWORLD_TYPE_HINTS, PALEDIT_PALWORLD_CUSTOM_PROPERTIES)
+
+            gvas_file = ProgressGvasFile.read(
+                raw_gvas, PALWORLD_TYPE_HINTS, SKP_PALWORLD_CUSTOM_PROPERTIES
+            )
             self.loaddata(gvas_file)
             # self.doconvertjson(file, (not self.debug))
         else:
@@ -802,7 +807,7 @@ class PalEdit():
                 else:
                     save_type = 0x31
                 sav_file = compress_gvas_to_sav(
-                    gvas_file.write(PALEDIT_PALWORLD_CUSTOM_PROPERTIES), save_type
+                    gvas_file.write(SKP_PALWORLD_CUSTOM_PROPERTIES), save_type
                 )
                 self.skilllabel.config(text=self.i18n['msg_writing'])
                 with open(file, "wb") as f:
@@ -1382,7 +1387,7 @@ Do you want to use %s's DEFAULT Scaling (%s)?
         self.filename = ""
         self.gui = self.createWindow()
         self.resetTitle()
-        self.palguidmanager: PalGuid = None
+        self.palguidmanager: PalInfo.PalGuid = None
         self.is_onselect = False
 
         self.suits = {}
